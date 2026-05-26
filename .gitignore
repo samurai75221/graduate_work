@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Конфиги с токенами
+config_local.py
+.env
+
+# Файлы с данными (опционально - можно включить в репозиторий с примерами)
+# favorites.json
+# blacklist.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Логи
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
