@@ -10,22 +10,26 @@ ENV/
 env.bak/
 venv.bak/
 
-# Конфиги с токенами
-config_local.py
-.env
-
-# Файлы с данными (опционально - можно включить в репозиторий с примерами)
-# favorites.json
-# blacklist.json
-
-# IDE
+# VSCode
 .vscode/
-.idea/
-*.swp
-*.swo
+*.code-workspace
 
-# Логи
+# PyCharm
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Project specific
+*.json
+!requirements.txt
+config_local.py
 *.log
+
+# Секреты и переменные окружения
+.env
+.env.local
+.env.*.local
 
 # OS
 .DS_Store

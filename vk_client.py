@@ -1,3 +1,5 @@
+"""Модуль для работы с API ВКонтакте"""
+
 import random
 import time
 from typing import List, Dict, Optional, Tuple
@@ -17,7 +19,15 @@ class VKClient:
         self.user_id = None
 
     def get_user_info(self, user_id: int) -> Dict:
-        """Получение информации о пользователе"""
+        """
+        Получение информации о пользователе
+
+        Args:
+            user_id: ID пользователя ВК
+
+        Returns:
+            Dict с данными пользователя
+        """
         try:
             response = self.vk.users.get(
                 user_ids=user_id,
@@ -38,7 +48,15 @@ class VKClient:
         return {}
 
     def calculate_age(self, bdate: str) -> Optional[int]:
-        """Вычисление возраста из даты рождения"""
+        """
+        Вычисление возраста из даты рождения
+
+        Args:
+            bdate: дата рождения в формате DD.MM.YYYY или D.M
+
+        Returns:
+            Возраст или None
+        """
         if not bdate:
             return None
 
@@ -50,7 +68,18 @@ class VKClient:
         return None
 
     def search_users(self, city: str, age_from: int, age_to: int, sex: int) -> List[Dict]:
-        """Поиск пользователей по критериям"""
+        """
+        Поиск пользователей по критериям
+
+        Args:
+            city: город
+            age_from: минимальный возраст
+            age_to: максимальный возраст
+            sex: пол (1 - женский, 2 - мужской)
+
+        Returns:
+            Список найденных пользователей
+        """
         try:
             # Определяем пол для поиска (противоположный)
             search_sex = 1 if sex == 2 else 2
@@ -91,7 +120,15 @@ class VKClient:
             return []
 
     def _get_city_id(self, city_name: str) -> Optional[int]:
-        """Получение ID города по названию"""
+        """
+        Получение ID города по названию
+
+        Args:
+            city_name: название города
+
+        Returns:
+            ID города или None
+        """
         try:
             response = self.vk.database.getCities(
                 q=city_name,
@@ -104,8 +141,16 @@ class VKClient:
             pass
         return 1  # По умолчанию Москва
 
-    def get_user_photos(self, user_id: int) -> List[Tuple[str, int]]:
-        """Получение топ фотографий пользователя по лайкам"""
+    def get_user_photos(self, user_id: int) -> List[Tuple[str, int, str]]:
+        """
+        Получение топ фотографий пользователя по лайкам
+
+        Args:
+            user_id: ID пользователя
+
+        Returns:
+            Список кортежей (URL_фото, количество_лайков, attachment_строка)
+        """
         try:
             response = self.vk.photos.get(
                 owner_id=user_id,
@@ -119,10 +164,12 @@ class VKClient:
             for photo in response.get('items', []):
                 likes_count = photo.get('likes', {}).get('count', 0)
                 # Берем максимальный размер фото
-                if photo.get('sizes'):
-                    max_size = max(photo['sizes'],
-                                  key=lambda x: x.get('width', 0) * x.get('height', 0))
-                    photos.append((max_size.get('url', ''), likes_count))
+                max_size = max(photo.get('sizes', []),
+                               key=lambda x: x.get('width', 0) * x.get('height', 0))
+                photo_url = max_size.get('url', '')
+                # Формируем attachment для ВКонтакте
+                attachment = f"photo{photo['owner_id']}_{photo['id']}"
+                photos.append((photo_url, likes_count, attachment))
 
             # Сортируем по лайкам и берем топ PHOTOS_COUNT
             photos.sort(key=lambda x: x[1], reverse=True)
@@ -132,8 +179,7 @@ class VKClient:
             print(f"Ошибка получения фото пользователя {user_id}: {e}")
             return []
 
-    def send_message(self, user_id: int, message: str, attachments: List[str] = None,
-                     keyboard: str = None):
+    def send_message(self, user_id: int, message: str, attachments: List[str] = None):
         """
         Отправка сообщения пользователю
 
@@ -141,49 +187,13 @@ class VKClient:
             user_id: ID получателя
             message: текст сообщения
             attachments: список вложений
-            keyboard: JSON клавиатуры
         """
         try:
-            params = {
-                'user_id': user_id,
-                'message': message,
-                'random_id': random.randint(1, 2**31)
-            }
-
-            if attachments:
-                params['attachment'] = ','.join(attachments)
-
-            if keyboard:
-                params['keyboard'] = keyboard
-
-            self.vk.messages.send(**params)
+            self.vk.messages.send(
+                user_id=user_id,
+                message=message,
+                attachment=','.join(attachments) if attachments else '',
+                random_id=random.randint(1, 2 ** 31)
+            )
         except ApiError as e:
             print(f"Ошибка отправки сообщения: {e}")
-
-    def get_photo_attachments(self, user_id: int) -> List[str]:
-        """
-        Получение фотографий в формате для attachment
-
-        Args:
-            user_id: ID пользователя
-
-        Returns:
-            Список строк в формате photo{owner_id}_{photo_id}
-        """
-        try:
-            response = self.vk.photos.get(
-                owner_id=user_id,
-                album_id='profile',
-                extended=1,
-                count=PHOTOS_COUNT
-            )
-
-            attachments = []
-            for photo in response.get('items', [])[:PHOTOS_COUNT]:
-                attachments.append(f"photo{photo['owner_id']}_{photo['id']}")
-
-            return attachments
-
-        except ApiError as e:
-            print(f"Ошибка получения фото для attachment: {e}")
-            return []

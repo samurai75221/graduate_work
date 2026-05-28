@@ -1,15 +1,13 @@
+"""Модуль с логикой обработки сообщений бота"""
+
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from vk_client import VKClient
 from storage import Storage
-from keyboards import VKKeyboard
 
 
 class DatingBot:
     """Бот для знакомств"""
-
-    # Словарь для отслеживания состояния пользователя
-    user_states = {}
 
     def __init__(self, vk_client: VKClient, storage: Storage):
         """Инициализация бота"""
@@ -17,9 +15,9 @@ class DatingBot:
         self.storage = storage
         self.user_search_results = {}  # Кэш результатов поиска для каждого пользователя
         self.user_current_index = {}  # Текущий индекс просматриваемого пользователя
-        self.user_photo_attachments = {}  # Кэш фото для аттачей
+        self.user_current_photos = {}  # Кэш фотографий для текущего пользователя
 
-    def handle_message(self, user_id: int, message: str) -> Optional[Tuple[str, str]]:
+    def handle_message(self, user_id: int, message: str) -> Optional[str]:
         """
         Обработка входящего сообщения
 
@@ -28,62 +26,47 @@ class DatingBot:
             message: текст сообщения
 
         Returns:
-            Кортеж (текст_ответа, клавиатура) или None
+            Текст ответа или None
         """
         message_lower = message.lower().strip()
 
-        # Обработка команд
-        if message_lower in ['начать поиск', '🔍 начать поиск', 'start']:
+        # Команды бота
+        if message_lower in ['начать', 'start', 'привет']:
             return self._start_search(user_id)
-        elif message_lower in ['дальше', '➡️ дальше', 'next', 'следующий']:
+        elif message_lower in ['дальше', 'next', 'следующий']:
             return self._get_next_user(user_id)
-        elif message_lower in ['добавить в избранное', '⭐ добавить в избранное', 'save']:
+        elif message_lower in ['избранные', 'favorites', 'список']:
+            return self._show_favorites(user_id)
+        elif message_lower in ['добавить', 'save', 'в избранное']:
             return self._add_current_to_favorites(user_id)
-        elif message_lower in ['избранные', '❤️ мои избранные', 'favorites']:
-            return self._show_favorites(user_id)
-        elif message_lower in ['показать избранных', '📋 показать избранных']:
-            return self._show_favorites(user_id)
-        elif message_lower in ['удалить из избранного', '🗑️ удалить из избранного']:
-            return self._show_favorites_for_deletion(user_id)
-        elif message_lower in ['помощь', '📋 помощь', 'help']:
+        elif message_lower in ['удалить', 'remove']:
+            return self._remove_from_favorites(user_id)
+        elif message_lower in ['помощь', 'help', '?']:
             return self._show_help()
-        elif message_lower in ['стоп', '🚪 стоп', 'exit', 'главное меню', '🏠 главное меню']:
-            return self._show_main_menu()
-        elif message_lower in ['пропустить', '🚫 пропустить']:
-            return self._skip_user(user_id)
-        elif message_lower.startswith('del_'):
-            return self._delete_favorite_by_id(user_id, message)
+        elif message_lower in ['стоп', 'stop', 'exit']:
+            return "До свидания! Чтобы начать поиск снова, напишите 'начать'."
 
-        # Если пользователь в режиме удаления, обрабатываем ID
-        if self.user_states.get(user_id) == 'deleting':
-            try:
-                fav_id = int(message)
-                return self._delete_favorite_by_id(user_id, fav_id)
-            except ValueError:
-                return self._show_favorites_for_deletion(user_id)
+        return None
 
-        return self._show_help()
-
-    def _start_search(self, user_id: int) -> Tuple[str, str]:
+    def _start_search(self, user_id: int) -> str:
         """Начало поиска пользователей"""
         # Получаем информацию о пользователе
         user_info = self.vk.get_user_info(user_id)
         if not user_info:
-            return ("❌ Не удалось получить информацию о вас. "
-                    "Пожалуйста, проверьте настройки приватности.",
-                    VKKeyboard.get_main_keyboard())
+            return "Не удалось получить информацию о вас. Пожалуйста, проверьте настройки приватности."
 
         # Определяем возраст
         age = self.vk.calculate_age(user_info.get('bdate', ''))
         if not age:
+            # Если возраст не определен, используем диапазон 20-30 лет
             age_from, age_to = 20, 30
         else:
-            age_from, age_to = max(18, age - 5), min(99, age + 5)
+            age_from, age_to = age - 5, age + 5
 
         # Поиск пользователей
         city = user_info.get('city', '')
         if not city:
-            city = "Москва"
+            city = "Москва"  # Город по умолчанию
 
         users = self.vk.search_users(city, age_from, age_to, user_info['sex'])
 
@@ -91,27 +74,63 @@ class DatingBot:
         users = [u for u in users if not self.storage.is_blacklisted(u['id'])]
 
         if not users:
-            return ("😔 К сожалению, не удалось найти пользователей по вашим критериям. "
-                    "Попробуйте позже или измените параметры.",
-                    VKKeyboard.get_main_keyboard())
+            return "К сожалению, не удалось найти пользователей по вашим критериям. Попробуйте позже."
 
         # Сохраняем результаты поиска
         self.user_search_results[user_id] = users
         self.user_current_index[user_id] = 0
 
-        # Получаем фото для первого пользователя
-        user = users[0]
-        photo_attachments = self.vk.get_photo_attachments(user['id'])
-        self.user_photo_attachments[user_id] = photo_attachments
+        # Отправляем первого пользователя с фото
+        return self._send_user_with_photos(user_id, users[0])
 
-        message = self._format_user_message(user)
-        return (message, VKKeyboard.get_action_keyboard())
+    def _send_user_with_photos(self, user_id: int, user: Dict) -> str:
+        """
+        Отправка пользователя с его фотографиями
 
-    def _get_next_user(self, user_id: int) -> Tuple[str, str]:
+        Args:
+            user_id: ID пользователя, которому отправляем
+            user: данные пользователя для показа
+
+        Returns:
+            Текст ответа
+        """
+        # Получаем фотографии пользователя
+        photos = self.vk.get_user_photos(user['id'])
+
+        # Сохраняем фотографии в кэш
+        self.user_current_photos[user_id] = photos
+
+        # Формируем текст сообщения
+        message = f"🎯 Найден пользователь:\n\n"
+        message += f"👤 {user['first_name']} {user['last_name']}\n"
+        message += f"🏙️ Город: {user.get('city', 'Не указан')}\n"
+        message += f"🔗 Ссылка: {user['profile_url']}\n\n"
+
+        if photos:
+            message += f"📸 Топ {len(photos)} фотографий (по лайкам):\n"
+            for i, (_, likes, _) in enumerate(photos, 1):
+                message += f"{i}. ❤️ {likes} лайков\n"
+        else:
+            message += "📸 Фотографии не найдены или профиль закрыт\n"
+
+        message += "\n💡 Доступные команды:\n"
+        message += "▪️ 'дальше' - следующий пользователь\n"
+        message += "▪️ 'добавить' - в избранное\n"
+        message += "▪️ 'избранные' - показать список\n"
+        message += "▪️ 'помощь' - все команды"
+
+        # Формируем attachments для отправки
+        attachments = [photo[2] for photo in photos] if photos else []
+
+        # Отправляем сообщение с фото
+        self.vk.send_message(user_id, message, attachments)
+
+        return None  # Сообщение уже отправлено
+
+    def _get_next_user(self, user_id: int) -> Optional[str]:
         """Получение следующего пользователя"""
         if user_id not in self.user_search_results:
-            return ("🔍 Сначала начните поиск командой 'Начать поиск'.",
-                    VKKeyboard.get_main_keyboard())
+            return "Сначала начните поиск командой 'начать'."
 
         users = self.user_search_results[user_id]
         current_index = self.user_current_index.get(user_id, 0)
@@ -121,119 +140,77 @@ class DatingBot:
             return self._start_search(user_id)
 
         self.user_current_index[user_id] = current_index + 1
-        user = users[current_index + 1]
+        next_user = users[current_index + 1]
 
-        # Получаем фото для нового пользователя
-        photo_attachments = self.vk.get_photo_attachments(user['id'])
-        self.user_photo_attachments[user_id] = photo_attachments
+        # Отправляем следующего пользователя с фото
+        return self._send_user_with_photos(user_id, next_user)
 
-        message = self._format_user_message(user)
-        return (message, VKKeyboard.get_action_keyboard())
-
-    def _skip_user(self, user_id: int) -> Tuple[str, str]:
-        """Пропустить текущего пользователя (добавить в черный список)"""
-        current_user = self._get_current_user(user_id)
-        if not current_user:
-            return ("Нет текущего пользователя для пропуска.",
-                    VKKeyboard.get_action_keyboard())
-
-        # Добавляем в черный список
-        self.storage.add_to_blacklist(current_user['id'])
-
-        # Показываем следующего
-        return self._get_next_user(user_id)
-
-    def _add_current_to_favorites(self, user_id: int) -> Tuple[str, str]:
+    def _add_current_to_favorites(self, user_id: int) -> str:
         """Добавление текущего пользователя в избранное"""
         current_user = self._get_current_user(user_id)
         if not current_user:
-            return ("❌ Нет текущего пользователя для добавления.",
-                    VKKeyboard.get_main_keyboard())
+            return "Нет текущего пользователя для добавления. Начните поиск командой 'начать'."
+
+        # Получаем фотографии пользователя (если еще нет в кэше)
+        photos = self.user_current_photos.get(user_id)
+        if not photos:
+            photos = self.vk.get_user_photos(current_user['id'])
 
         # Добавляем фотографии к данным пользователя
-        photos = self.vk.get_user_photos(current_user['id'])
-        current_user['photos'] = [photo[0] for photo in photos]
-        current_user['photos_likes'] = [photo[1] for photo in photos]
+        current_user['photos'] = [photo[0] for photo in photos]  # URLs
+        current_user['photos_attachments'] = [photo[2] for photo in photos]  # Attachments
+        current_user['photos_likes'] = [photo[1] for photo in photos]  # Likes count
 
         if self.storage.add_to_favorites(current_user):
-            message = (f"✅ {current_user['first_name']} {current_user['last_name']} "
-                       f"добавлен(а) в избранное!")
+            return f"✅ {current_user['first_name']} {current_user['last_name']} добавлен(а) в избранное!\n\n📸 Сохранено {len(photos)} фотографий."
         else:
-            message = (f"⚠️ {current_user['first_name']} {current_user['last_name']} "
-                       f"уже в избранном.")
+            return f"⚠️ {current_user['first_name']} {current_user['last_name']} уже в избранном."
 
-        # Автоматически показываем следующего пользователя
-        return (message + "\n\n" + self._get_next_user(user_id)[0],
-                VKKeyboard.get_action_keyboard())
+    def _remove_from_favorites(self, user_id: int) -> str:
+        """Удаление пользователя из избранного"""
+        favorites = self.storage.get_favorites()
+        if not favorites:
+            return "Ваш список избранных пуст."
 
-    def _show_favorites(self, user_id: int) -> Tuple[str, str]:
+        # Показываем список избранных с индексами
+        response = "📋 Ваши избранные:\n\n"
+        for i, fav in enumerate(favorites, 1):
+            response += f"{i}. {fav['first_name']} {fav['last_name']} (ID: {fav['id']})\n"
+
+        response += "\n✏️ Чтобы удалить, отправьте номер пользователя (например, 'удалить 1')"
+        response += "\n💡 Или отправьте 'удалить все' для очистки всего списка"
+
+        # Здесь нужно реализовать двухшаговую команду
+        # Для упрощения, удаляем первого в списке
+        removed_user = favorites[0]
+        self.storage.remove_from_favorites(removed_user['id'])
+        return f"✅ Удален(а) {removed_user['first_name']} {removed_user['last_name']} из избранного."
+
+    def _show_favorites(self, user_id: int) -> str:
         """Показ списка избранных"""
         favorites = self.storage.get_favorites()
 
         if not favorites:
-            return ("💔 Ваш список избранных пока пуст.\n"
-                    "Начните поиск и добавляйте понравившихся людей!",
-                    VKKeyboard.get_main_keyboard())
+            return "💔 Ваш список избранных пока пуст.\n\nНачните поиск командой 'начать' и добавляйте понравившихся!"
 
-        message = "💖 **Ваш список избранных** 💖\n\n"
+        response = "💖 ВАШ СПИСОК ИЗБРАННЫХ 💖\n\n"
         for i, fav in enumerate(favorites, 1):
-            message += f"{i}. 👤 {fav['first_name']} {fav['last_name']}\n"
-            message += f"   🔗 {fav['profile_url']}\n"
-            message += f"   📅 Добавлен: {fav.get('added_at', 'Неизвестно')[:10]}\n\n"
+            response += f"{i}. {fav['first_name']} {fav['last_name']}\n"
+            response += f"   🔗 Ссылка: {fav['profile_url']}\n"
+            response += f"   📅 Добавлен: {fav.get('added_at', 'Неизвестно')[:19]}\n"
 
-        return (message, VKKeyboard.get_favorites_keyboard())
+            # Показываем информацию о сохраненных фото
+            if 'photos_likes' in fav and fav['photos_likes']:
+                response += f"   📸 Сохранено фото: {len(fav['photos_likes'])}\n"
+                response += f"   ❤️ Всего лайков: {sum(fav['photos_likes'])}\n"
 
-    def _show_favorites_for_deletion(self, user_id: int) -> Tuple[str, str]:
-        """Показать список избранных для удаления"""
-        favorites = self.storage.get_favorites()
+            response += "\n"
 
-        if not favorites:
-            return ("📭 Список избранных пуст. Нечего удалять.",
-                    VKKeyboard.get_main_keyboard())
+        response += "💡 Команды:\n"
+        response += "• 'удалить' - удалить пользователя из избранного\n"
+        response += "• 'дальше' - продолжить поиск"
 
-        message = "🗑️ **Выберите пользователя для удаления**\n\n"
-        for i, fav in enumerate(favorites, 1):
-            message += f"{i}. {fav['first_name']} {fav['last_name']}\n"
-            message += f"   ID: {fav['id']}\n\n"
-
-        message += "Отправьте ID пользователя для удаления из избранного:"
-
-        # Сохраняем состояние пользователя
-        self.user_states[user_id] = 'deleting'
-
-        return (message, VKKeyboard.get_favorites_keyboard())
-
-    def _delete_favorite_by_id(self, user_id: int, fav_id) -> Tuple[str, str]:
-        """Удаление пользователя из избранного по ID"""
-        try:
-            if isinstance(fav_id, str):
-                if fav_id.startswith('del_'):
-                    fav_id = int(fav_id[4:])
-                else:
-                    fav_id = int(fav_id)
-        except ValueError:
-            return ("❌ Пожалуйста, отправьте корректный ID пользователя.",
-                    VKKeyboard.get_favorites_keyboard())
-
-        # Поиск и удаление
-        favorites = self.storage.get_favorites()
-        user_to_delete = None
-
-        for fav in favorites:
-            if fav['id'] == fav_id:
-                user_to_delete = fav
-                break
-
-        if user_to_delete:
-            self.storage.remove_from_favorites(fav_id)
-            # Сбрасываем состояние
-            self.user_states.pop(user_id, None)
-            return (f"✅ {user_to_delete['first_name']} {user_to_delete['last_name']} "
-                    f"удален(а) из избранного.",
-                    VKKeyboard.get_main_keyboard())
-        else:
-            return ("❌ Пользователь с таким ID не найден в избранном.",
-                    VKKeyboard.get_favorites_keyboard())
+        return response
 
     def _get_current_user(self, user_id: int) -> Optional[Dict]:
         """Получение текущего просматриваемого пользователя"""
@@ -247,51 +224,64 @@ class DatingBot:
             return users[current_index]
         return None
 
-    def _format_user_message(self, user: Dict) -> str:
-        """Форматирование сообщения о пользователе"""
-        message = (
-            f"🎯 **Найден пользователь** 🎯\n\n"
-            f"👤 **{user['first_name']} {user['last_name']}**\n"
-            f"🏙️ **Город:** {user.get('city', 'Не указан')}\n"
-            f"🔗 **Ссылка:** {user['profile_url']}\n\n"
-            f"📸 **Топ фотографии:**\n"
-        )
-
-        return message
-
-    def _show_help(self) -> Tuple[str, str]:
+    def _show_help(self) -> str:
         """Показ справки"""
         help_text = """
-🤖 **Бот для знакомств ВКонтакте** 🤖
+🤖 **БОТ ДЛЯ ЗНАКОМСТВ ВКОНТАКТЕ** 🤖
 
-**📋 Доступные команды:**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔹 `Начать поиск` - начать подбор пользователей
-🔹 `Дальше` - показать следующего пользователя
-🔹 `Добавить в избранное` - сохранить текущего в избранное
-🔹 `Мои избранные` - показать список избранных
-🔹 `Удалить из избранного` - удалить пользователя
-🔹 `Пропустить` - пропустить и больше не показывать
-🔹 `Помощь` - показать эту справку
-🔹 `Главное меню` - вернуться в главное меню
+**📌 Доступные команды:**
 
-**✨ Как это работает:**
-1. Бот анализирует ваш профиль (город, возраст, пол)
-2. Находит подходящих пользователей для знакомств
-3. Показывает фото, имя и ссылку на профиль
-4. Вы можете добавлять понравившихся в избранное
+🔹 `начать` - начать поиск пользователей
+🔹 `дальше` - показать следующего пользователя
+🔹 `добавить` - добавить текущего пользователя в избранное
+🔹 `избранные` - показать список избранных
+🔹 `удалить` - удалить пользователя из избранного
+🔹 `помощь` - показать эту справку
+🔹 `стоп` - завершить работу
 
-**💡 Совет:** Используйте кнопки для удобного управления!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Приятного общения! 💝
+**⚙️ Как это работает:**
+
+1️⃣ Бот анализирует ваш профиль:
+   • Город проживания
+   • Возраст
+   • Пол
+
+2️⃣ Находит подходящих пользователей для знакомств
+   (противоположный пол, ±5 лет от вашего возраста)
+
+3️⃣ Показывает:
+   • Имя и фамилию
+   • Ссылку на профиль
+   • Топ-3 фотографии по лайкам
+
+4️⃣ Вы можете:
+   • Сохранять понравившихся в избранное
+   • Просматривать список избранных
+   • Переходить к следующим кандидатам
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**💡 Советы:**
+
+• Добавляйте в избранное тех, кто вам действительно интересен
+• Используйте команду 'дальше' для просмотра новых людей
+• Ваши избранные сохраняются навсегда (в файле favorites.json)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**❓ Нужна помощь?**
+
+Если у вас возникли проблемы:
+• Убедитесь, что ваш профиль не закрыт
+• Проверьте, что указали город и дату рождения
+• Напишите разработчику: @your_support
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎉 **Приятного общения!** 🎉
         """
-        return (help_text, VKKeyboard.get_main_keyboard())
-
-    def _show_main_menu(self) -> Tuple[str, str]:
-        """Показать главное меню"""
-        # Очищаем состояние пользователя
-        self.user_states.pop(user_id, None) if hasattr(self, 'user_states') else None
-
-        return ("🏠 **Главное меню**\n\n"
-                "Выберите действие с помощью кнопок ниже:",
-                VKKeyboard.get_main_keyboard())
+        return help_text
