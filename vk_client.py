@@ -19,15 +19,7 @@ class VKClient:
         self.user_id = None
 
     def get_user_info(self, user_id: int) -> Dict:
-        """
-        Получение информации о пользователе
-
-        Args:
-            user_id: ID пользователя ВК
-
-        Returns:
-            Dict с данными пользователя
-        """
+        """Получение информации о пользователе"""
         try:
             response = self.vk.users.get(
                 user_ids=user_id,
@@ -36,7 +28,7 @@ class VKClient:
             if response:
                 user = response[0]
                 return {
-                    'id': user['id'],
+                    'vk_id': user['id'],  # Приводим к схеме DATA_SCHEMA.md
                     'first_name': user.get('first_name', ''),
                     'last_name': user.get('last_name', ''),
                     'city': user.get('city', {}).get('title', ''),
@@ -48,43 +40,21 @@ class VKClient:
         return {}
 
     def calculate_age(self, bdate: str) -> Optional[int]:
-        """
-        Вычисление возраста из даты рождения
-
-        Args:
-            bdate: дата рождения в формате DD.MM.YYYY или D.M
-
-        Returns:
-            Возраст или None
-        """
+        """Вычисление возраста из даты рождения"""
         if not bdate:
             return None
 
         parts = bdate.split('.')
-        if len(parts) == 3:  # Полная дата
+        if len(parts) == 3:
             current_year = time.localtime().tm_year
             birth_year = int(parts[2])
             return current_year - birth_year
         return None
 
     def search_users(self, city: str, age_from: int, age_to: int, sex: int) -> List[Dict]:
-        """
-        Поиск пользователей по критериям
-
-        Args:
-            city: город
-            age_from: минимальный возраст
-            age_to: максимальный возраст
-            sex: пол (1 - женский, 2 - мужской)
-
-        Returns:
-            Список найденных пользователей
-        """
+        """Поиск пользователей по критериям"""
         try:
-            # Определяем пол для поиска (противоположный)
             search_sex = 1 if sex == 2 else 2
-
-            # Получаем ID города
             city_id = self._get_city_id(city)
 
             response = self.vk.users.search(
@@ -100,10 +70,9 @@ class VKClient:
 
             users = []
             for user in response.get('items', []):
-                # Исключаем забаненных и удаленные страницы
                 if not user.get('is_closed', True) or user.get('can_access_closed', False):
                     users.append({
-                        'id': user['id'],
+                        'vk_id': user['id'],  # Приводим к схеме
                         'first_name': user['first_name'],
                         'last_name': user['last_name'],
                         'city': user.get('city', {}).get('title', ''),
@@ -111,7 +80,6 @@ class VKClient:
                         'profile_url': f"https://vk.com/id{user['id']}"
                     })
 
-            # Перемешиваем для разнообразия
             random.shuffle(users)
             return users
 
@@ -120,15 +88,7 @@ class VKClient:
             return []
 
     def _get_city_id(self, city_name: str) -> Optional[int]:
-        """
-        Получение ID города по названию
-
-        Args:
-            city_name: название города
-
-        Returns:
-            ID города или None
-        """
+        """Получение ID города по названию"""
         try:
             response = self.vk.database.getCities(
                 q=city_name,
@@ -139,14 +99,11 @@ class VKClient:
                 return response['items'][0]['id']
         except ApiError:
             pass
-        return 1  # По умолчанию Москва
+        return 1
 
     def get_user_photos(self, user_id: int) -> List[Tuple[str, int, str]]:
         """
         Получение топ фотографий пользователя по лайкам
-
-        Args:
-            user_id: ID пользователя
 
         Returns:
             Список кортежей (URL_фото, количество_лайков, attachment_строка)
@@ -163,15 +120,12 @@ class VKClient:
             photos = []
             for photo in response.get('items', []):
                 likes_count = photo.get('likes', {}).get('count', 0)
-                # Берем максимальный размер фото
                 max_size = max(photo.get('sizes', []),
-                               key=lambda x: x.get('width', 0) * x.get('height', 0))
+                              key=lambda x: x.get('width', 0) * x.get('height', 0))
                 photo_url = max_size.get('url', '')
-                # Формируем attachment для ВКонтакте
                 attachment = f"photo{photo['owner_id']}_{photo['id']}"
                 photos.append((photo_url, likes_count, attachment))
 
-            # Сортируем по лайкам и берем топ PHOTOS_COUNT
             photos.sort(key=lambda x: x[1], reverse=True)
             return photos[:PHOTOS_COUNT]
 
@@ -179,21 +133,30 @@ class VKClient:
             print(f"Ошибка получения фото пользователя {user_id}: {e}")
             return []
 
-    def send_message(self, user_id: int, message: str, attachments: List[str] = None):
+    def send_message(self, user_id: int, message: str, attachments: List[str] = None, keyboard=None):
         """
-        Отправка сообщения пользователю
+        Отправка сообщения пользователю с поддержкой клавиатуры
 
         Args:
             user_id: ID получателя
             message: текст сообщения
             attachments: список вложений
+            keyboard: объект клавиатуры VkKeyboard
         """
         try:
-            self.vk.messages.send(
-                user_id=user_id,
-                message=message,
-                attachment=','.join(attachments) if attachments else '',
-                random_id=random.randint(1, 2 ** 31)
-            )
+            params = {
+                'user_id': user_id,
+                'message': message,
+                'random_id': random.randint(1, 2**31)
+            }
+
+            if attachments:
+                params['attachment'] = ','.join(attachments)
+
+            if keyboard:
+                params['keyboard'] = keyboard.get_keyboard()
+
+            self.vk.messages.send(**params)
+
         except ApiError as e:
             print(f"Ошибка отправки сообщения: {e}")

@@ -1,73 +1,87 @@
-import json
-from typing import List, Dict
+"""Модуль для создания клавиатур бота"""
+
+from vk_api.keyboard import VkKeyboard, VkKeyboardColor
+from config import KeyboardConfig
 
 
-class VKKeyboard:
-    """Класс для создания клавиатур ВКонтакте"""
+class Keyboards:
+    """Класс для создания клавиатур"""
 
     @staticmethod
-    def create_keyboard(buttons: List[List[str]], one_time: bool = False) -> str:
+    def get_main_keyboard() -> VkKeyboard:
         """
-        Создание клавиатуры
-
-        Args:
-            buttons: список строк кнопок
-            one_time: одноразовая ли клавиатура
+        Главная клавиатура с основными командами
 
         Returns:
-            JSON строка с клавиатурой
+            VkKeyboard: объект клавиатуры
         """
-        keyboard = {
-            "one_time": one_time,
-            "buttons": []
-        }
+        keyboard = VkKeyboard(one_time=False)
 
-        for row in buttons:
-            keyboard_row = []
-            for button_text in row:
-                # Определяем цвет кнопки в зависимости от текста
-                color = "primary"  # Синяя кнопка по умолчанию
+        # Первый ряд
+        keyboard.add_button(KeyboardConfig.BTN_START, color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button(KeyboardConfig.BTN_NEXT, color=VkKeyboardColor.PRIMARY)
 
-                if "❤️" in button_text or "⭐" in button_text or "добавить" in button_text:
-                    color = "positive"  # Зеленая кнопка
-                elif "🚫" in button_text or "🗑️" in button_text or "удалить" in button_text:
-                    color = "negative"  # Красная кнопка
-                elif "Дальше" in button_text or "дальше" in button_text:
-                    color = "primary"  # Синяя кнопка
+        # Второй ряд
+        keyboard.add_line()
+        keyboard.add_button(KeyboardConfig.BTN_FAVORITE, color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button(KeyboardConfig.BTN_FAVORITES, color=VkKeyboardColor.PRIMARY)
 
-                keyboard_row.append({
-                    "action": {
-                        "type": "text",
-                        "label": button_text
-                    },
-                    "color": color
-                })
-            keyboard["buttons"].append(keyboard_row)
+        # Третий ряд
+        keyboard.add_line()
+        keyboard.add_button(KeyboardConfig.BTN_HELP, color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button(KeyboardConfig.BTN_STOP, color=VkKeyboardColor.NEGATIVE)
 
-        return json.dumps(keyboard, ensure_ascii=False)
+        return keyboard
 
     @staticmethod
-    def get_main_keyboard() -> str:
-        """Получить главную клавиатуру"""
-        from config import KeyboardConfig
-        return VKKeyboard.create_keyboard(KeyboardConfig.MAIN_MENU)
+    def get_search_keyboard() -> VkKeyboard:
+        """
+        Клавиатура для режима поиска
+
+        Returns:
+            VkKeyboard: объект клавиатуры
+        """
+        keyboard = VkKeyboard(one_time=False)
+
+        keyboard.add_button(KeyboardConfig.BTN_NEXT, color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button(KeyboardConfig.BTN_FAVORITE, color=VkKeyboardColor.POSITIVE)
+
+        keyboard.add_line()
+        keyboard.add_button(KeyboardConfig.BTN_FAVORITES, color=VkKeyboardColor.SECONDARY)
+        keyboard.add_button(KeyboardConfig.BTN_STOP, color=VkKeyboardColor.NEGATIVE)
+
+        return keyboard
 
     @staticmethod
-    def get_action_keyboard() -> str:
-        """Получить клавиатуру действий с пользователем"""
-        from config import KeyboardConfig
-        return VKKeyboard.create_keyboard(KeyboardConfig.ACTION_MENU)
+    def get_favorites_keyboard() -> VkKeyboard:
+        """
+        Клавиатура для режима просмотра избранных
+
+        Returns:
+            VkKeyboard: объект клавиатуры
+        """
+        keyboard = VkKeyboard(one_time=False)
+
+        keyboard.add_button(KeyboardConfig.BTN_NEXT, color=VkKeyboardColor.PRIMARY)
+        keyboard.add_button(KeyboardConfig.BTN_FAVORITE, color=VkKeyboardColor.POSITIVE)
+
+        keyboard.add_line()
+        keyboard.add_button("🗑️ Удалить", color=VkKeyboardColor.NEGATIVE)
+        keyboard.add_button(KeyboardConfig.BTN_HELP, color=VkKeyboardColor.SECONDARY)
+
+        return keyboard
 
     @staticmethod
-    def get_favorites_keyboard() -> str:
-        """Получить клавиатуру управления избранными"""
-        from config import KeyboardConfig
-        return VKKeyboard.create_keyboard(KeyboardConfig.FAVORITES_MENU)
+    def get_simple_keyboard() -> VkKeyboard:
+        """
+        Простая клавиатура с базовыми кнопками
 
-    @staticmethod
-    def remove_keyboard() -> str:
-        """Убрать клавиатуру"""
-        return json.dumps({
-            "one_time": False,
-            "buttons": []
-        })
+        Returns:
+            VkKeyboard: объект клавиатуры
+        """
+        keyboard = VkKeyboard(one_time=False)
+
+        keyboard.add_button(KeyboardConfig.BTN_START, color=VkKeyboardColor.POSITIVE)
+        keyboard.add_button(KeyboardConfig.BTN_HELP, color=VkKeyboardColor.SECONDARY)
+
+        return keyboard

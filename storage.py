@@ -1,7 +1,9 @@
+"""Модуль для работы с файловым хранилищем данных"""
+
 import json
 import os
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict
 from functools import wraps
 
 
@@ -25,7 +27,6 @@ class Storage:
     """Класс для работы с JSON хранилищем"""
 
     def __init__(self, favorites_file='favorites.json', blacklist_file='blacklist.json'):
-        """Инициализация хранилища"""
         self.favorites_file = favorites_file
         self.blacklist_file = blacklist_file
 
@@ -42,41 +43,86 @@ class Storage:
 
     def add_to_favorites(self, user_data: Dict) -> bool:
         """
-        Добавление пользователя в избранное
+        Добавление пользователя в избранное в соответствии со схемой DATA_SCHEMA.md
 
-        Args:
-            user_data: данные пользователя
-
-        Returns:
-            True если добавлен, False если уже существует
+        Ожидаемая структура user_data:
+        {
+            'vk_id': int,
+            'first_name': str,
+            'last_name': str,
+            'city': str,
+            'profile_url': str,
+            'photo_url': str,
+            'photos': list,
+            'photos_attachments': list,
+            'photos_likes': list
+        }
         """
         favorites = self.load_favorites()
 
-        # Проверяем, не в избранном ли уже
+        # Проверяем по vk_id
         for fav in favorites:
-            if fav['id'] == user_data['id']:
+            if fav.get('vk_id') == user_data.get('vk_id'):
                 return False
 
-        # Добавляем временную метку
-        user_data['added_at'] = datetime.now().isoformat()
-        favorites.append(user_data)
+        # Приводим к единой структуре согласно DATA_SCHEMA.md
+        favorite_entry = {
+            'vk_id': user_data.get('vk_id'),
+            'first_name': user_data.get('first_name'),
+            'last_name': user_data.get('last_name'),
+            'city': user_data.get('city', ''),
+            'profile_url': user_data.get('profile_url', ''),
+            'photo_url': user_data.get('photo_url', ''),
+            'photos': user_data.get('photos', []),
+            'photos_attachments': user_data.get('photos_attachments', []),
+            'photos_likes': user_data.get('photos_likes', []),
+            'saved_at': datetime.now().isoformat()  # saved_at согласно схеме
+        }
+
+        favorites.append(favorite_entry)
         self.save_favorites(favorites)
         return True
 
-    def remove_from_favorites(self, user_id: int) -> bool:
+    def remove_from_favorites(self, vk_id: int) -> bool:
         """
-        Удаление пользователя из избранного
+        Удаление пользователя из избранного по vk_id
 
         Args:
-            user_id: ID пользователя
+            vk_id: ID пользователя ВКонтакте
 
         Returns:
             True если удален, False если не найден
         """
         favorites = self.load_favorites()
-        favorites = [fav for fav in favorites if fav['id'] != user_id]
-        self.save_favorites(favorites)
-        return True
+        original_count = len(favorites)
+
+        # Фильтруем по vk_id
+        favorites = [fav for fav in favorites if fav.get('vk_id') != vk_id]
+
+        if len(favorites) < original_count:
+            self.save_favorites(favorites)
+            return True
+
+        return False
+
+    def remove_favorite_by_index(self, index: int) -> bool:
+        """
+        Удаление пользователя из избранного по индексу (для пользовательского интерфейса)
+
+        Args:
+            index: индекс в списке (начиная с 0)
+
+        Returns:
+            True если удален, False если индекс не корректен
+        """
+        favorites = self.load_favorites()
+
+        if 0 <= index < len(favorites):
+            removed = favorites.pop(index)
+            self.save_favorites(favorites)
+            return True
+
+        return False
 
     def get_favorites(self) -> List[Dict]:
         """Получение списка избранных"""
@@ -94,15 +140,7 @@ class Storage:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def add_to_blacklist(self, user_id: int) -> bool:
-        """
-        Добавление пользователя в черный список
-
-        Args:
-            user_id: ID пользователя
-
-        Returns:
-            True если добавлен, False если уже в списке
-        """
+        """Добавление пользователя в черный список"""
         blacklist = self.load_blacklist()
         if user_id in blacklist:
             return False
